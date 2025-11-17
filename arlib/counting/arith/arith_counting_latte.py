@@ -1,4 +1,7 @@
-"""LIA model counting via LattE integration (stub)."""
+"""LIA model counting via LattE integration (stub).
+https://www.math.ucdavis.edu/~latte/
+https://github.com/latte-int/latte
+"""
 
 import shutil
 import subprocess
