@@ -129,10 +129,11 @@ class MaxSATSolver:
         try:
             if self.maxsat_engine == "FM":
                 fm = FM(self.wcnf, verbose=0)
-                fm.compute()
+                found_solution = fm.compute()
                 result.cost = fm.cost
-                result.solution = fm.model
-                result.status = "optimal" if fm.found_optimum() else "satisfied"
+                result.solution = getattr(fm, 'model', None)
+                # FM algorithm finds optimum when it completes successfully
+                result.status = "optimal" if found_solution and hasattr(fm, 'model') and fm.model is not None else "satisfied"
 
             elif self.maxsat_engine == "RC2":
                 rc2 = RC2(self.wcnf)
@@ -158,10 +159,11 @@ class MaxSATSolver:
             else:
                 logger.warning(f"Unknown engine {self.maxsat_engine}, using FM")
                 fm = FM(self.wcnf, verbose=0)
-                fm.compute()
+                found_solution = fm.compute()
                 result.cost = fm.cost
-                result.solution = fm.model
-                result.status = "optimal" if fm.found_optimum() else "satisfied"
+                result.solution = getattr(fm, 'model', None)
+                # FM algorithm finds optimum when it completes successfully
+                result.status = "optimal" if found_solution and hasattr(fm, 'model') and fm.model is not None else "satisfied"
 
         except Exception as e:
             logger.error(f"Error solving MaxSAT problem: {str(e)}")

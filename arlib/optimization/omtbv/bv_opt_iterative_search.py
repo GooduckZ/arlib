@@ -1,32 +1,46 @@
 """
-TODO. pysmt cannot handle bit-vector operations in a few formulas generaed by z3.
- E.g., it may have a more strict restriction on
-  the number of arguments to certain bit-vector options
+Iterative search-based optimization for bit-vector OMT problems.
+
+Note: PySMT may have stricter restrictions on bit-vector operations compared to Z3,
+particularly regarding the number of arguments to certain bit-vector operations.
 """
 import logging
+from typing import Any, Union
 
-from arlib.utils import get_expr_vars
+import z3
+from pysmt.shortcuts import And, BV, BVUGT, BVULE, BVULT, BVUGE, Solver
 
-from arlib.optimization.pysmt_utils import *
+from arlib.optimization.pysmt_utils import z3_to_pysmt
+from arlib.utils.z3_expr_utils import get_expr_vars
 
 logger = logging.getLogger(__name__)
 
 
-def bv_opt_with_linear_search(z3_fml: z3.ExprRef, z3_obj: z3.ExprRef,
-                              minimize: bool, solver_name: str):
-    """Linear Search based OMT using PySMT with bit-vectors.
-    solver_name: the backend SMT solver for pySMT
+def bv_opt_with_linear_search(
+    z3_fml: z3.ExprRef,
+    z3_obj: z3.ExprRef,
+    minimize: bool,
+    solver_name: str,
+) -> Union[int, str]:
+    """Perform linear search-based OMT using PySMT with bit-vectors.
+
+    Args:
+        z3_fml: Z3 formula to optimize
+        z3_obj: Z3 objective expression to optimize
+        minimize: If True, minimize the objective; if False, maximize
+        solver_name: Backend SMT solver name for PySMT
+
+    Returns:
+        Optimal value as integer, or "unsatisfiable" if no solution exists
     """
     objname = z3_obj
     all_vars = get_expr_vars(z3_fml)
     if z3_obj not in all_vars:
-        # NOTICE: we create a new variable to represent obj (a term, e.g., x + y)
+        # Create a new variable to represent obj (a term, e.g., x + y)
         objname = z3.BitVec(str(z3_obj), z3_obj.sort().size())
         z3_fml = z3.And(z3_fml, objname == z3_obj)
 
     obj, fml = z3_to_pysmt(z3_fml, objname)
-    # print(obj)
-    # print(fml)
     logger.info("Starting linear search optimization")
     logger.debug(f"Optimization direction: {'minimize' if minimize else 'maximize'}")
 
@@ -34,137 +48,165 @@ def bv_opt_with_linear_search(z3_fml: z3.ExprRef, z3_obj: z3.ExprRef,
         solver.add_assertion(fml)
 
         if minimize:
-            lower = BV(0, obj.bv_width())
-            iteration = 0
-            while solver.solve():
-                iteration += 1
-                model = solver.get_model()
-                lower = model.get_value(obj)
-                solver.add_assertion(BVULT(obj, lower))
-                logger.debug(f"Iteration {iteration}: Current lower bound = {lower}")
-            logger.info(f"Minimization completed after {iteration} iterations")
-            logger.info(f"Final minimum value: {lower}")
-            return str(lower)
+            return _minimize_linear_search(solver, obj)
         else:
-            cur_upper = None
-            iteration = 0
-            logger.info("Starting linear search maximization")
-            while solver.solve():
-                iteration += 1
-                model = solver.get_model()
-                cur_upper = model.get_value(obj)
-                logger.debug(f"Iteration {iteration}: Current upper bound = {cur_upper}")
-                solver.add_assertion(BVUGT(obj, cur_upper))
-
-            result = str(cur_upper) if cur_upper is not None else "unsatisfiable"
-            logger.info(f"Maximization completed after {iteration} iterations")
-            logger.info(f"Final maximum value: {result}")
-            return result
+            return _maximize_linear_search(solver, obj)
 
 
-def bv_opt_with_binary_search(z3_fml, z3_obj, minimize: bool, solver_name: str):
-    """Binary Search based OMT using PySMT with bit-vectors."""
-    # Convert Z3 expressions to PySMT
+def bv_opt_with_binary_search(
+    z3_fml: z3.ExprRef,
+    z3_obj: z3.ExprRef,
+    minimize: bool,
+    solver_name: str,
+) -> int:
+    """Perform binary search-based OMT using PySMT with bit-vectors.
+
+    Args:
+        z3_fml: Z3 formula to optimize
+        z3_obj: Z3 objective expression to optimize
+        minimize: If True, minimize the objective; if False, maximize
+        solver_name: Backend SMT solver name for PySMT
+
+    Returns:
+        Optimal value as integer
+    """
     objname = z3_obj
     all_vars = get_expr_vars(z3_fml)
     if z3_obj not in all_vars:
-        # NOTICE: we create a new variable to represent obj (a term, e.g., x + y)
+        # Create a new variable to represent obj (a term, e.g., x + y)
         objname = z3.BitVec(str(z3_obj), z3_obj.sort().size())
         z3_fml = z3.And(z3_fml, objname == z3_obj)
 
     obj, fml = z3_to_pysmt(z3_fml, objname)
 
-    # print(obj)
-    # print(fml)
-
-    sz = obj.bv_width()
-    max_bv = (1 << sz) - 1
+    bv_width = obj.bv_width()
+    max_bv = (1 << bv_width) - 1
     logger.info("Starting binary search optimization")
     logger.debug(f"Optimization direction: {'minimize' if minimize else 'maximize'}")
 
-    if not minimize:
-        solver = Solver(name=solver_name)
+    with Solver(name=solver_name) as solver:
         solver.add_assertion(fml)
 
-        cur_min, cur_max = 0, max_bv
-        upper = BV(0, sz)
-        iteration = 0
+        if minimize:
+            return _minimize_binary_search(solver, obj, bv_width, max_bv)
+        else:
+            return _maximize_binary_search(solver, obj, bv_width, max_bv)
 
-        while cur_min <= cur_max:
-            iteration += 1
-            solver.push()
 
-            cur_mid = cur_min + ((cur_max - cur_min) >> 1)
-            logger.debug(f"Iteration {iteration}:")
-            logger.debug(f"  min: {cur_min}, mid: {cur_mid}, max: {cur_max}")
-            logger.debug(f"  current upper: {upper}")
+def _minimize_linear_search(solver: Solver, obj: Any) -> int:
+    """Helper function for linear search minimization."""
+    lower = BV(0, obj.bv_width())
+    iteration = 0
+    while solver.solve():
+        iteration += 1
+        model = solver.get_model()
+        lower = model.get_value(obj)
+        solver.add_assertion(BVULT(obj, lower))
+        logger.debug(f"Iteration {iteration}: Current lower bound = {lower}")
+    logger.info(f"Minimization completed after {iteration} iterations")
+    logger.info(f"Final minimum value: {lower}")
+    return int(lower.constant_value())
 
-            # cur_min_expr = BV(cur_min, sz)
-            cur_mid_expr = BV(cur_mid, sz)
-            cur_max_expr = BV(cur_max, sz)
 
-            cond = And(BVUGE(obj, cur_mid_expr),
-                       BVULE(obj, cur_max_expr))
-            solver.add_assertion(cond)
+def _maximize_linear_search(solver: Solver, obj: Any) -> Union[int, str]:
+    """Helper function for linear search maximization."""
+    cur_upper = None
+    iteration = 0
+    logger.info("Starting linear search maximization")
+    while solver.solve():
+        iteration += 1
+        model = solver.get_model()
+        cur_upper = model.get_value(obj)
+        logger.debug(f"Iteration {iteration}: Current upper bound = {cur_upper}")
+        solver.add_assertion(BVUGT(obj, cur_upper))
 
-            if not solver.solve():
-                cur_max = cur_mid - 1
-                logger.debug("  No solution found, reducing upper bound")
-            else:
-                model = solver.get_model()
-                upper = model.get_value(obj)
-                cur_min = int(upper.constant_value()) + 1
-                logger.debug(f"  Found solution: {upper}")
-            solver.pop()
-
+    if cur_upper is not None:
+        result = int(cur_upper.constant_value())
         logger.info(f"Maximization completed after {iteration} iterations")
-        logger.info(f"Final maximum value: {upper}")
-        return upper
+        logger.info(f"Final maximum value: {result}")
+        return result
     else:
-        # Compute minimum
-        solver = Solver(name=solver_name)
-        solver.add_assertion(fml)
-        cur_min, cur_max = 0, max_bv
-        lower = BV(max_bv, sz)
-        iteration = 0
-
-        while cur_min <= cur_max:
-            iteration += 1
-            solver.push()
-            cur_mid = cur_min + ((cur_max - cur_min) >> 1)
-            logger.debug(f"Iteration {iteration}:")
-            logger.debug(f"  min: {cur_min}, mid: {cur_mid}, max: {cur_max}")
-            logger.debug(f"  current lower: {lower}")
-
-            cur_min_expr = BV(cur_min, sz)
-            cur_mid_expr = BV(cur_mid, sz)
-            # cur_max_expr = BV(cur_max, sz)
-            cond = And(BVUGE(obj, cur_min_expr),
-                       BVULE(obj, cur_mid_expr))
-            solver.add_assertion(cond)
-
-            if not solver.solve():
-                cur_min = cur_mid + 1
-                logger.debug("  No solution found, increasing lower bound")
-            else:
-                model = solver.get_model()
-                lower = model.get_value(obj)
-                cur_max = int(lower.constant_value()) - 1
-                logger.debug(f"  Found solution: {lower}")
-            solver.pop()
-
-        min_value = lower
-        logger.info(f"Minimization completed after {iteration} iterations")
-        logger.info(f"Final minimum value: {lower}")
-        return min_value
+        logger.info("Maximization completed: unsatisfiable")
+        return "unsatisfiable"
 
 
-def demo_iterative():
+def _minimize_binary_search(solver: Solver, obj: Any, bv_width: int, max_bv: int) -> int:
+    """Helper function for binary search minimization."""
+    cur_min, cur_max = 0, max_bv
+    lower = BV(max_bv, bv_width)
+    iteration = 0
+
+    while cur_min <= cur_max:
+        iteration += 1
+        solver.push()
+        cur_mid = cur_min + ((cur_max - cur_min) >> 1)
+        logger.debug(f"Iteration {iteration}:")
+        logger.debug(f"  min: {cur_min}, mid: {cur_mid}, max: {cur_max}")
+        logger.debug(f"  current lower: {lower}")
+
+        cur_min_expr = BV(cur_min, bv_width)
+        cur_mid_expr = BV(cur_mid, bv_width)
+        cond = And(BVUGE(obj, cur_min_expr), BVULE(obj, cur_mid_expr))
+        solver.add_assertion(cond)
+
+        if not solver.solve():
+            cur_min = cur_mid + 1
+            logger.debug("  No solution found, increasing lower bound")
+        else:
+            model = solver.get_model()
+            lower = model.get_value(obj)
+            cur_max = int(lower.constant_value()) - 1
+            logger.debug(f"  Found solution: {lower}")
+        solver.pop()
+
+    logger.info(f"Minimization completed after {iteration} iterations")
+    logger.info(f"Final minimum value: {lower}")
+    return int(lower.constant_value())
+
+
+def _maximize_binary_search(solver: Solver, obj: Any, bv_width: int, max_bv: int) -> int:
+    """Helper function for binary search maximization."""
+    cur_min, cur_max = 0, max_bv
+    upper = BV(0, bv_width)
+    iteration = 0
+
+    while cur_min <= cur_max:
+        iteration += 1
+        solver.push()
+
+        cur_mid = cur_min + ((cur_max - cur_min) >> 1)
+        logger.debug(f"Iteration {iteration}:")
+        logger.debug(f"  min: {cur_min}, mid: {cur_mid}, max: {cur_max}")
+        logger.debug(f"  current upper: {upper}")
+
+        cur_mid_expr = BV(cur_mid, bv_width)
+        cur_max_expr = BV(cur_max, bv_width)
+        cond = And(BVUGE(obj, cur_mid_expr), BVULE(obj, cur_max_expr))
+        solver.add_assertion(cond)
+
+        if not solver.solve():
+            cur_max = cur_mid - 1
+            logger.debug("  No solution found, reducing upper bound")
+        else:
+            model = solver.get_model()
+            upper = model.get_value(obj)
+            cur_min = int(upper.constant_value()) + 1
+            logger.debug(f"  Found solution: {upper}")
+        solver.pop()
+
+    logger.info(f"Maximization completed after {iteration} iterations")
+    logger.info(f"Final maximum value: {upper}")
+    return int(upper.constant_value())
+
+
+def demo_iterative() -> None:
+    """Demonstrate iterative search optimization methods."""
     import time
-    x, y, z = z3.BitVecs("x y z", 16)
+
+    y = z3.BitVec("y", 16)
     fml = z3.And(z3.UGT(y, 3), z3.ULT(y, 10))
     start_time = time.time()
-    print("start solving")
+    logger.info("Starting solving")
     try:
         logger.info("\nRunning linear search maximization...")
         lin_res = bv_opt_with_linear_search(fml, y, minimize=False, solver_name="z3")

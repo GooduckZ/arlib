@@ -1,11 +1,13 @@
 """
-Reduce OMT(BV) to Weighted MaxSAT
+Reduce OMT(BV) to Weighted MaxSAT.
 
+This module provides functions to reduce bit-vector optimization problems to
+weighted MaxSAT problems using:
 1. OBV-BS and its variants
-2. Existing weighted MaxSAT...
+2. Existing weighted MaxSAT solvers
 """
 import logging
-from typing import List, Union, Any
+from typing import Optional, Union
 
 import z3
 
@@ -14,34 +16,42 @@ from arlib.optimization.omtbv.bit_blast_omt_solver import BitBlastOMTBVSolver
 logger = logging.getLogger(__name__)
 
 
-def bv_opt_with_maxsat(z3_fml: z3.ExprRef, z3_obj: z3.ExprRef,
-                       minimize: bool, solver_name: str) -> Union[int, float]:
-    """Reduce OMT(BV) to Weighted MaxSAT
+def bv_opt_with_maxsat(
+    z3_fml: z3.ExprRef,
+    z3_obj: z3.ExprRef,
+    minimize: bool,
+    solver_name: str,
+) -> Optional[Union[int, float]]:
+    """Reduce OMT(BV) to Weighted MaxSAT.
 
     Args:
-        z3_fml: Z3 formula
-        z3_obj: Objective variable
-        minimize: Whether to minimize (True) or maximize (False)
+        z3_fml: Z3 formula to optimize
+        z3_obj: Objective variable to optimize
+        minimize: If True, minimize the objective; if False, maximize
         solver_name: Name of the MaxSAT solver to use
 
     Returns:
-        Optimal value found by the solver
+        Optimal value found by the solver, or None if optimization failed
+
+    Note:
+        Currently all objectives are converted to "maximize" internally.
+        For minimization, we maximize the negation and convert the result.
+        TODO: Consider adding a dedicated minimize_with_maxsat API.
     """
     omt = BitBlastOMTBVSolver()
     omt.from_smt_formula(z3_fml)
     omt.set_engine(solver_name)
-    sz = z3_obj.size()
-    max_bv = (1 << sz) - 1
+    bv_width = z3_obj.size()
+    max_bv = (1 << bv_width) - 1
+
     if minimize:
-        # FIXME: it seems that we convert all the objectives to "maximize xx".
-        #  So, maybe we do not need this new API? But how can we know whether the original
-        #  objective is "minimize" or "maximize"?
-        # TODO: add the API minimize_with_maxsat???
-        # return omt.minimize_with_maxsat(z3_obj, is_signed=False)
-        # is the following right?
+        # Convert minimization to maximization by maximizing the negation
         tmp = omt.maximize_with_maxsat(-z3_obj, is_signed=False)
-        # print(tmp)
-        return max_bv + 1 - tmp  # why?
+        if tmp is None:
+            return None
+        # Convert result back: if we maximize -x and get value v,
+        # then the minimum of x is max_bv + 1 - v
+        return max_bv + 1 - tmp
     else:
         return omt.maximize_with_maxsat(z3_obj, is_signed=False)
 
@@ -49,13 +59,15 @@ def bv_opt_with_maxsat(z3_fml: z3.ExprRef, z3_obj: z3.ExprRef,
 def demo_maxsat() -> None:
     """Demo function for MaxSAT-based bit-vector optimization."""
     import time
-    x, y, z = z3.BitVecs("x y z", 4)
+
+    y = z3.BitVec("y", 4)
     fml = z3.And(z3.UGT(y, 3), z3.ULT(y, 10))
-    print("start solving")
-    res = bv_opt_with_maxsat(fml, y, minimize=True, solver_name="FM")
-    print(res)
+    logger.info("Starting MaxSAT-based optimization")
     start = time.time()
-    print("solving time: ", time.time() - start)
+    res = bv_opt_with_maxsat(fml, y, minimize=True, solver_name="FM")
+    elapsed_time = time.time() - start
+    logger.info("Result: %s", res)
+    logger.info("Solving time: %.3f seconds", elapsed_time)
 
 
 if __name__ == '__main__':

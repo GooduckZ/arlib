@@ -49,13 +49,13 @@ test:
     - pip
 
 about:
-  home: https://github.com/ZJU-Automated-Reasoning-Group/arlib
+  home: https://github.com/ZJU-PL/arlib
   license: MIT
   license_family: MIT
   summary: A library for various automated reasoning tasks.
-  doc_url: https://github.com/ZJU-Automated-Reasoning-Group/arlib
-  dev_url: https://github.com/ZJU-Automated-Reasoning-Group/arlib
+  doc_url: https://github.com/ZJU-PL/arlib
+  dev_url: https://github.com/ZJU-PL/arlib
 
 extra:
   recipe-maintainers:
-    - rainoftime 
+    - rainoftime

@@ -13,7 +13,7 @@ from setuptools import find_packages, setup, Command
 # Package meta-data.
 NAME = 'py-arlib'
 DESCRIPTION = 'A library for various automated reasoning tasks.'
-URL = ' https://github.com/ZJU-Automated-Reasoning-Group/arlib'
+URL = ' https://github.com/ZJU-PL/arlib'
 EMAIL = 'rainoftime@gmail.com'
 AUTHOR = 'rainoftime'
 REQUIRES_PYTHON = '>=3.6.0'

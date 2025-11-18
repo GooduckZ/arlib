@@ -4,7 +4,7 @@ from pysmt.shortcuts import BVULT, BVUGT
 from pysmt.shortcuts import Symbol, And, BV, BVUGE, BVULE, Solver, ForAll, Exists, qelim
 from pysmt.typing import INT, REAL, BVType, BOOL
 from pysmt.fnode import FNode
-from arlib.utils import get_expr_vars
+from arlib.utils.z3_expr_utils import get_expr_vars
 
 # BV1, BV8, BV16, BV32, BV64, BV128
 # NOTE: both pysmt and z3 have a class "Solver"
